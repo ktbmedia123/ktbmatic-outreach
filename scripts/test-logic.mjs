@@ -92,3 +92,5 @@ assert.equal(pickBestEmail(['kontakt_iodo@michelin.com'], 'https://michelin.pl')
 assert.equal(pickBestEmail(['helpdesk@melle.com', 'iod@melle.com'], 'https://k2.com.pl'), '');
 assert.equal(pickBestEmail(['pomoc@autoiso.pl'], 'https://autobaza.pl'), 'pomoc@autoiso.pl');
 console.log('✓ odrzucanie adresów z obcych domen');
+assert.equal(pickBestEmail(['arpityres@gmail.com'], 'https://arpityres.pl'), 'arpityres@gmail.com');
+console.log('✓ darmowe skrzynki małych firm');

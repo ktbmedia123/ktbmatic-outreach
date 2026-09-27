@@ -34,6 +34,9 @@ export function mergeEnrichment(lead, r) {
 const BAD_LOCAL = /^(iod|iodo|kontakt_iodo|inspektor|reklamacje|reklamacja|zwroty|complaints|technicalsupport|technical-support|tech|uktechservice|c\.service|customerservices\d*|rodo|gdpr|dpo|privacy|prywatnosc|daneosobowe|dane\.osobowe|rekrutacja|recruitment|kariera|careers|jobs|praca|hr|noreply|no-reply|donotreply|abuse|postmaster|webmaster|hostmaster|admin|root|test|example|xxx|user|name|email|mail)@/i;
 const BAD_DOMAIN = /@(xxx|example|domain|email|test|sentry[^.]*|wixpress)\./i;
 
+// małe firmy często używają darmowych skrzynek – to nadal ich adres
+const FREEMAIL = /^(gmail\.com|googlemail\.com|wp\.pl|o2\.pl|onet\.pl|onet\.eu|op\.pl|interia\.pl|interia\.eu|poczta\.fm|tlen\.pl|gazeta\.pl|outlook\.com|hotmail\.com|icloud\.com|yahoo\.com)$/i;
+
 export const usableEmails = (emails = []) => emails.filter((e) => e && !BAD_LOCAL.test(e) && !BAD_DOMAIN.test(e));
 
 // Kolejność: dział marketingu / współpracy, potem ogólne adresy firmy, na końcu adresy osób.
@@ -56,7 +59,7 @@ export function pickBestEmail(emails = [], website = '') {
   const base = site.split('.').slice(-2).join('.');
   const allowed = usableEmails(emails).filter((e) => {
     const dom = (e.split('@')[1] || '').toLowerCase();
-    return !site || dom.endsWith(base) || (/\.pl$/.test(site) && /\.pl$/.test(dom));
+    return !site || dom.endsWith(base) || FREEMAIL.test(dom) || (/\.pl$/.test(site) && /\.pl$/.test(dom));
   });
   return allowed.sort((a, b) => rank(a) - rank(b))[0] || '';
 }
