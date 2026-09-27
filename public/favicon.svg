@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#111315"/>
+  <g transform="translate(9.5 13.5) scale(0.115)">
+    <g transform="translate(-620 -238)">
+      <path fill="#FDFBF7" d="M748 240 L745 358 Q744 362 741 365 L712 393 Q704 401 708 411 L720 441 Q723 451 715 459 L622 548 L622 354 Q622 349 626 345 Z"/>
+      <path fill="#FCCD35" d="M913 240 L1010 240 L862 372 Q857 376 850 376 L762 376 Z"/>
+      <path fill="#FDFBF7" d="M723 409 L739 394 Q742 391 747 391 L821 391 L976 545 L867 545 Q860 545 855 540 Z"/>
+    </g>
+  </g>
+</svg>
