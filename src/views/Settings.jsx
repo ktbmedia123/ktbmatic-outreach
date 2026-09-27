@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Download, Upload, Trash2, Loader2, Plus, KeyRound } from 'lucide-react';
 import { useStore, saveSettings, exportBackup, importBackup, resetAll, addOptout, removeOptout } from '../lib/store.js';
+import { syncNow } from '../lib/sync.js';
 import { listModels } from '../lib/ai.js';
 import { downloadText } from '../lib/csv.js';
 import { Field, toast, fmtDate } from '../components/ui.jsx';
@@ -131,8 +132,8 @@ export default function Settings() {
               <input type="file" accept="application/json,.json" onChange={onImport} hidden />
             </label>
             <div className="spacer" />
-            <button className="btn danger" onClick={() => { if (confirm('Usunąć wszystkie kampanie, kontakty i ustawienia z tej przeglądarki?')) resetAll(); }}>
-              <Trash2 size={16} /> Wyczyść wszystko
+            <button className="btn danger" onClick={() => { if (confirm('Wyczyścić dane w tej przeglądarce? Wspólna baza zespołu zostanie i zaraz pobierze się ponownie.')) { resetAll(); syncNow(); } }}>
+              <Trash2 size={16} /> Wyczyść tę przeglądarkę
             </button>
           </div>
         </div>

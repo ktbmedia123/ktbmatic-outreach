@@ -62,3 +62,22 @@ assert.equal(merged.length, 2, 'ta sama strona www = ta sama firma');
 assert.equal(merged[0].email, 'biuro@kowalski-auto.pl');
 assert.deepEqual(merged[0].sources, ['osm', 'google']);
 console.log('✓ łączenie wyników z mapy i Google');
+
+// Wspólna baza: scalanie zmian z dwóch przeglądarek
+const { mergeShared, stampChanges, toShared, applyShared } = await import('../src/lib/merge.js');
+const T = Date.now();
+const base = { senders: [], campaigns: [], leads: [], optout: [], settings: { dailyLimit: 40 }, deleted: {} };
+const A = stampChanges(base, { ...base, leads: [{ id: 'l1', name: 'A', createdAt: '1' }] }, T + 1000);
+const B = stampChanges(base, { ...base, leads: [{ id: 'l2', name: 'B', createdAt: '2' }] }, T + 1001);
+let srv = mergeShared(toShared(A), toShared(B));
+assert.equal(srv.leads.length, 2, 'dwie przeglądarki dodają różne firmy → obie zostają');
+// A edytuje l1, B go usuwa później → usunięcie wygrywa
+const A2 = stampChanges(A, { ...A, leads: [{ ...A.leads[0], name: 'A2' }] }, T + 2000);
+const B2 = stampChanges(applyShared(B, srv), { ...applyShared(B, srv), leads: applyShared(B, srv).leads.filter((l) => l.id !== 'l1') }, T + 3000);
+srv = mergeShared(mergeShared(srv, toShared(A2)), toShared(B2));
+assert.deepEqual(srv.leads.map((l) => l.id), ['l2'], 'późniejsze usunięcie wygrywa z wcześniejszą edycją');
+// nowsza edycja wygrywa ze starszą
+const C1 = stampChanges(base, { ...base, campaigns: [{ id: 'c1', name: 'stara' }] }, T + 100);
+const C2 = { ...C1, campaigns: [{ id: 'c1', name: 'nowa', _u: T + 200 }] };
+assert.equal(mergeShared(toShared(C2), toShared(C1)).campaigns[0].name, 'nowa');
+console.log('✓ scalanie wspólnej bazy');

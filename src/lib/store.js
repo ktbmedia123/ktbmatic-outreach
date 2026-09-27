@@ -3,6 +3,7 @@
 // podpiąć Firestore i synchronizować dane w całym zespole.
 import { useSyncExternalStore } from 'react';
 import { DEFAULT_SENDERS, DEFAULT_SETTINGS, CAMPAIGN_TEMPLATES } from './defaults.js';
+import { stampChanges } from './merge.js';
 
 const KEY = 'ktbmatic:v1';
 const listeners = new Set();
@@ -18,6 +19,8 @@ function freshState() {
     leads: [],
     optout: [],
     settings: { ...DEFAULT_SETTINGS },
+    deleted: {},
+    sharedU: 0,
   };
 }
 
@@ -50,10 +53,13 @@ export function getState() {
   return state;
 }
 
-export function setState(updater) {
-  state = typeof updater === 'function' ? updater(state) : updater;
+// meta.remote = zmiana przyszła ze wspólnej bazy (nie stemplujemy jej i nie odsyłamy)
+export function setState(updater, meta = {}) {
+  const prev = state;
+  const next = typeof updater === 'function' ? updater(state) : updater;
+  state = meta.remote ? next : stampChanges(prev, next);
   persist();
-  listeners.forEach((l) => l());
+  listeners.forEach((l) => l(meta));
 }
 
 export function subscribe(fn) {
@@ -263,6 +269,7 @@ export function importBackup(json) {
   });
 }
 
+// Czyści dane tylko w tej przeglądarce – wspólna baza zostaje i zostanie pobrana ponownie.
 export function resetAll() {
-  setState(freshState());
+  setState(freshState(), { remote: true });
 }

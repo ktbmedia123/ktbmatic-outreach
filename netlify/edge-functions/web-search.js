@@ -1,5 +1,6 @@
 // Wyszukiwanie firm w Google – przez Gemini z narzędziem Google Search (darmowy limit klucza GEMINI_API_KEY).
 // Działa jako Netlify Edge Function, bo wyszukiwanie z AI trwa zwykle 10–30 s (zwykłe funkcje mają limit 10 s).
+import { requireUser } from '../lib/auth.mjs';
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MODELS = ['gemini-flash-latest', 'gemini-3.5-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite'];
 
@@ -67,6 +68,8 @@ async function ask(key, prompt) {
 
 export default async (req) => {
   if (req.method !== 'POST') return Response.json({ error: 'Użyj POST' }, { status: 405 });
+  const auth = await requireUser(req, (k) => Netlify.env.get(k));
+  if (auth.error) return auth.error;
   const key = Netlify.env.get('GEMINI_API_KEY');
   if (!key) return Response.json({ error: 'Brak GEMINI_API_KEY na Netlify' }, { status: 501 });
   let body;

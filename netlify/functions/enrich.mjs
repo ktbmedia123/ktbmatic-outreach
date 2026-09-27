@@ -1,4 +1,5 @@
 // Pobiera stronę firmy (+ podstronę kontakt) i wyciąga: e-maile, telefony, profile social media, opis.
+import { requireUser } from '../lib/auth.mjs';
 const UA = 'Mozilla/5.0 (compatible; KTBmatic/1.0; +https://ktbmedia.eu)';
 const MAX_BYTES = 1_500_000;
 
@@ -99,6 +100,8 @@ export function extract(html, baseUrl) {
 
 export default async (req) => {
   if (req.method !== 'POST') return Response.json({ error: 'Użyj POST' }, { status: 405 });
+  const auth = await requireUser(req, (k) => process.env[k]);
+  if (auth.error) return auth.error;
   let url;
   try {
     const body = await req.json();

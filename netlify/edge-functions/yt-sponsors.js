@@ -2,6 +2,7 @@
 // które pojawiają się przy słowach „partner”, „sponsor”, „kod rabatowy”, „współpraca” itd.
 // YouTube Data API v3 – darmowy limit 10 000 jednostek dziennie (wyszukiwanie tematu = 100, kanał = ~3).
 // Nazwy marek porządkuje Gemini (zwykłe zapytanie, bez płatnego wyszukiwania Google).
+import { requireUser } from '../lib/auth.mjs';
 const YT = 'https://www.googleapis.com/youtube/v3';
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MODELS = ['gemini-flash-latest', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
@@ -89,6 +90,8 @@ ${items.map((it, i) => `${i}. domena: ${it.host || '-'} | tekst: ${it.line}`).jo
 
 export default async (req) => {
   if (req.method !== 'POST') return Response.json({ error: 'Użyj POST' }, { status: 405 });
+  const auth = await requireUser(req, (k) => Netlify.env.get(k));
+  if (auth.error) return auth.error;
   const ytKey = Netlify.env.get('YOUTUBE_API_KEY');
   if (!ytKey) return Response.json({ error: 'Brak YOUTUBE_API_KEY na Netlify (klucz „KTBmatic YouTube” z Google Cloud).' }, { status: 501 });
   let body;

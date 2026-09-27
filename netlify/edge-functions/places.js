@@ -1,6 +1,7 @@
 // Wyszukiwanie firm w OpenStreetMap po stronie serwera (Netlify Edge).
 // Pyta kilka serwerów Overpass równolegle i zwraca pierwszą poprawną odpowiedź –
 // przeglądarka nie czeka w nieskończoność, a CORS nie ma znaczenia.
+import { requireUser } from '../lib/auth.mjs';
 const MIRRORS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
@@ -12,6 +13,8 @@ const LIMIT_MS = 20000;
 
 export default async (req) => {
   if (req.method !== 'POST') return Response.json({ error: 'Użyj POST' }, { status: 405 });
+  const auth = await requireUser(req, (k) => Netlify.env.get(k));
+  if (auth.error) return auth.error;
   let query;
   try {
     ({ query } = await req.json());

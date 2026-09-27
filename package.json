@@ -10,6 +10,7 @@
     "test": "node scripts/test-logic.mjs"
   },
   "dependencies": {
+    "@netlify/blobs": "^11.1.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.460.0",
     "papaparse": "^5.4.1",

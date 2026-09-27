@@ -1,6 +1,9 @@
 // Pośrednik do Gemini – używa klucza GEMINI_API_KEY ustawionego w Netlify (Site settings → Environment variables).
+import { requireUser } from '../lib/auth.mjs';
 export default async (req) => {
   if (req.method !== 'POST') return Response.json({ error: 'Użyj POST' }, { status: 405 });
+  const auth = await requireUser(req, (k) => process.env[k]);
+  if (auth.error) return auth.error;
   const key = process.env.GEMINI_API_KEY;
   if (!key) return Response.json({ error: 'Brak GEMINI_API_KEY na Netlify' }, { status: 501 });
   const { model = 'gemini-flash-latest', body } = await req.json();

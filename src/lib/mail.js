@@ -1,8 +1,8 @@
+import { loadGis } from './auth.js';
 // Poczta: szkice w Gmailu (Gmail API + logowanie Google w przeglądarce),
 // pliki .eml (otwierają się jako gotowa do wysłania wiadomość w Outlooku / Thunderbirdzie)
 // oraz link mailto: jako najprostszy wariant.
 
-const GIS_SRC = 'https://accounts.google.com/gsi/client';
 const SCOPE = 'https://www.googleapis.com/auth/gmail.compose';
 
 function b64utf8(str) {
@@ -67,22 +67,6 @@ export function slug(s) {
 }
 
 // ---------- Gmail ----------
-let gisPromise;
-function loadGis() {
-  if (window.google?.accounts?.oauth2) return Promise.resolve();
-  if (!gisPromise) {
-    gisPromise = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = GIS_SRC;
-      s.async = true;
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('Nie udało się załadować logowania Google.'));
-      document.head.appendChild(s);
-    });
-  }
-  return gisPromise;
-}
-
 // Tokeny trzymamy tylko w pamięci karty (ważne ok. 1 h), osobno dla każdego nadawcy.
 const tokens = new Map();
 
