@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Search, MapPin, Loader2, Plus, Upload, Sparkles, Mail, Globe, Phone, AtSign } from 'lucide-react';
+import { Search, MapPin, Loader2, Plus, Upload, Sparkles, Mail, Globe, Phone, AtSign, Youtube } from 'lucide-react';
 import { useStore, addLeads, saveCampaign } from '../lib/store.js';
 import { CATEGORIES, categoryLabel } from '../lib/defaults.js';
 import { geocode, searchPlaces } from '../lib/osm.js';
@@ -52,11 +52,12 @@ export default function Research({ campaignId }) {
       ) : (
         <>
           <div className="tabs">
-            {[['mapa', 'Z mapy'], ['csv', 'Import CSV'], ['ai', 'Propozycje AI']].map(([k, l]) => (
+            {[['mapa', 'Z mapy'], ['yt', 'Sponsorzy z YouTube'], ['csv', 'Import CSV'], ['ai', 'Propozycje AI']].map(([k, l]) => (
               <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
           {tab === 'mapa' && <MapSearch key={campaign.id} campaign={campaign} />}
+          {tab === 'yt' && <YtSponsors campaign={campaign} sender={sender} />}
           {tab === 'csv' && <CsvImport campaign={campaign} />}
           {tab === 'ai' && <AiProspects campaign={campaign} sender={sender} />}
         </>
@@ -65,11 +66,8 @@ export default function Research({ campaignId }) {
   );
 }
 
-const SOURCES = [
-  ['both', 'Google + mapa', 'najwięcej firm, wyniki połączone'],
-  ['google', 'Google', 'wizytówki, strony, katalogi firm'],
-  ['osm', 'Mapa OSM', 'szybko, dokładne położenie'],
-];
+// Google (Gemini + Google Search) wymaga płatnego planu Gemini – w darmowym planie zostaje mapa.
+const SOURCES = [['osm', 'Mapa OSM', 'OpenStreetMap, zapasowo Nominatim']];
 
 const normName = (s = '') => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 
@@ -80,7 +78,7 @@ function MapSearch({ campaign }) {
   const [center, setCenter] = useState(campaign.location || null);
   const [radius, setRadius] = useState(campaign.location?.radiusKm || 20);
   const [cats, setCats] = useState(campaign.categories.length ? campaign.categories : ['warsztaty']);
-  const [source, setSource] = useState('both');
+  const [source, setSource] = useState('osm');
   const [keywords, setKeywords] = useState('');
   const [results, setResults] = useState(null);
   const [sources, setSources] = useState([]);
@@ -234,7 +232,7 @@ function MapSearch({ campaign }) {
             ))}
           </div>
         </div>
-        <div className="grid-2" style={{ alignItems: 'end' }}>
+        {SOURCES.length > 1 && <div className="grid-2" style={{ alignItems: 'end' }}>
           <div>
             <small>Źródło</small>
             <div className="chips" style={{ marginTop: 6 }}>
@@ -249,7 +247,7 @@ function MapSearch({ campaign }) {
           <Field label="Słowa kluczowe (Google, opcjonalnie)" hint="np. „mechanika ciężarowa”, „diagnostyka komputerowa”, „bez sieciówek”.">
             <input value={keywords} onChange={(e) => setKeywords(e.target.value)} disabled={source === 'osm'} placeholder="doprecyzuj, czego szukasz" />
           </Field>
-        </div>
+        </div>}
         <div className="row">
           <button className="btn primary" onClick={search} disabled={(!center && !query.trim()) || !cats.length || busy === 'search'}>
             {busy === 'search' ? <Loader2 size={16} className="spin" /> : <Search size={16} />} Szukaj firm
@@ -476,6 +474,159 @@ function AiProspects({ campaign, sender }) {
                     <td className="nm">{f.name}<br /><small>{f.why}</small></td>
                     <td>{f.website ? <a href={f.website} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{f.website.replace(/^https?:\/\/(www\.)?/, '')}</a> : <small>brak strony</small>}</td>
                     <td className="hide-sm"><small>{f.city}</small></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+async function fetchYtSponsors({ channels, topics }) {
+  const res = await fetch('/api/yt-sponsors', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channels, topics }),
+  });
+  const isJson = (res.headers.get('content-type') || '').includes('json');
+  if (res.status === 404 || !isJson) throw new Error('Wyszukiwanie sponsorów działa po wdrożeniu na Netlify.');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Błąd ${res.status}`);
+  return data;
+}
+
+const splitList = (t) => t.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
+
+// Marki, które sponsorują twórców (z opisów filmów YouTube) + podobne marki od AI.
+function YtSponsors({ campaign, sender }) {
+  const [channels, setChannels] = useState('@Tasiem');
+  const [topics, setTopics] = useState('drift\ntuning samochodów\nvlog motoryzacyjny');
+  const [data, setData] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [busy, setBusy] = useState('');
+  const [similar, setSimilar] = useState([]);
+
+  const run = async () => {
+    setBusy('yt');
+    setSimilar([]);
+    try {
+      const d = await fetchYtSponsors({ channels: splitList(channels), topics: splitList(topics) });
+      setData(d);
+      setSelected(new Set(d.brands.map((b) => b.website)));
+      if (d.errors?.length) toast(`Część kanałów/tematów pominięto: ${d.errors[0]}`, 'err');
+      if (!d.brands.length) toast('Nie znaleziono marek w opisach. Dodaj więcej kanałów albo tematów.');
+    } catch (e) {
+      toast(e.message, 'err');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const findSimilar = async () => {
+    setBusy('ai');
+    try {
+      const names = (data?.brands || []).slice(0, 25).map((b) => b.brand).join(', ');
+      const r = await suggestProspects({
+        campaign,
+        sender,
+        count: 20,
+        hint: `Marki podobne do tych, które już sponsorują twórców motoryzacyjnych na YouTube: ${names}. Szukaj firm z Polski, które reklamują się u influencerów (motoryzacja, tuning, chemia, oleje, opony, części, napoje, odzież, gry, ubezpieczenia, finanse). Pomiń marki z listy.`,
+      });
+      const known = new Set((data?.brands || []).map((b) => b.brand.toLowerCase()));
+      setSimilar(r.filter((f) => !known.has(f.name.toLowerCase())));
+    } catch (e) {
+      toast(e.message, 'err');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const add = () => {
+    const fromYt = (data?.brands || []).filter((b) => selected.has(b.website)).map((b) => ({
+      name: b.brand,
+      website: b.website,
+      about: b.category ? `${b.category}.` : '',
+      notes: `Sponsoruje/partner u: ${b.channels.join(', ')}. Dowód: „${b.evidence}” (https://youtu.be/${b.videos[0]?.id}).`,
+      source: 'youtube',
+      osmId: `yt/${b.website}`,
+    }));
+    const fromAi = similar.filter((f) => selected.has(`ai:${f.name}`)).map((f) => ({
+      name: f.name,
+      website: f.website || '',
+      city: f.city || '',
+      about: f.why || '',
+      notes: 'Propozycja AI – podobna do sponsorów z YouTube. Sprawdź przed wysyłką.',
+      source: 'ai',
+      osmId: `ai/${f.name.toLowerCase()}`,
+    }));
+    const added = addLeads(campaign.id, [...fromYt, ...fromAi]);
+    toast(`Dodano ${added.length} firm. W kampanii kliknij „Pobierz dane ze stron”, żeby znaleźć e-maile.`);
+    if (added.length) go(`kampania/${campaign.id}/firmy`);
+  };
+
+  const toggle = (k) => setSelected((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+
+  return (
+    <div className="stack lg">
+      <div className="panel stack">
+        <p className="muted">
+          Przeglądam opisy pod filmami twórców i wyciągam marki z linii typu „partnerem odcinka jest…”, „kod rabatowy”, „współpraca reklamowa”. To firmy, które już płacą influencerom motoryzacyjnym – najlepsi kandydaci na sponsorów. Darmowy limit YouTube wystarcza na kilkadziesiąt wyszukiwań dziennie.
+        </p>
+        <div className="grid-2">
+          <Field label="Kanały twórców" hint="Po jednym w linii: @nazwa, link do kanału albo ID kanału. Maks. 15.">
+            <textarea value={channels} onChange={(e) => setChannels(e.target.value)} style={{ minHeight: 110 }} />
+          </Field>
+          <Field label="Tematy filmów" hint="Znajdzie popularne polskie filmy z ostatnich 18 miesięcy. Maks. 5.">
+            <textarea value={topics} onChange={(e) => setTopics(e.target.value)} style={{ minHeight: 110 }} />
+          </Field>
+        </div>
+        <div className="row">
+          <button className="btn primary" onClick={run} disabled={!!busy}>
+            {busy === 'yt' ? <Loader2 size={16} className="spin" /> : <Youtube size={16} />} Szukaj sponsorów
+          </button>
+          {busy === 'yt' && <small>Czytam opisy filmów (10–30 s)…</small>}
+        </div>
+      </div>
+
+      {data && (
+        <div className="panel flush">
+          <div className="panel-head" style={{ flexWrap: 'wrap' }}>
+            <h3>{data.brands.length} marek</h3>
+            <small>z {data.scannedVideos} przejrzanych filmów</small>
+            <div className="spacer" />
+            <button className="btn" onClick={findSimilar} disabled={!!busy || !data.brands.length}>
+              {busy === 'ai' ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />} Podobne marki (AI)
+            </button>
+            <button className="btn primary" disabled={!selected.size} onClick={add}><Plus size={16} /> Dodaj zaznaczone ({selected.size})</button>
+          </div>
+          <div className="table-wrap" style={{ maxHeight: 560 }}>
+            <table className="t">
+              <thead><tr><th /><th>Marka</th><th>U kogo</th><th className="hide-sm">Dowód z opisu</th></tr></thead>
+              <tbody>
+                {data.brands.map((b) => (
+                  <tr key={b.website} className={`clickable ${selected.has(b.website) ? 'sel' : ''}`} onClick={() => toggle(b.website)}>
+                    <td style={{ width: 30 }}><input type="checkbox" readOnly checked={selected.has(b.website)} aria-label={`Zaznacz ${b.brand}`} /></td>
+                    <td className="nm">
+                      {b.brand}
+                      <br />
+                      <small><a href={b.website} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{b.website.replace(/^https:\/\//, '')}</a>{b.category ? ` · ${b.category}` : ''}</small>
+                    </td>
+                    <td><small>{b.channels.slice(0, 3).join(', ')}{b.channels.length > 3 ? ` +${b.channels.length - 3}` : ''}</small></td>
+                    <td className="hide-sm">
+                      <small>„{b.evidence}”</small>
+                      {b.videos[0] && <><br /><small><a href={`https://youtu.be/${b.videos[0].id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{b.videos[0].title}</a></small></>}
+                    </td>
+                  </tr>
+                ))}
+                {similar.map((f) => (
+                  <tr key={`ai:${f.name}`} className={`clickable ${selected.has(`ai:${f.name}`) ? 'sel' : ''}`} onClick={() => toggle(`ai:${f.name}`)}>
+                    <td style={{ width: 30 }}><input type="checkbox" readOnly checked={selected.has(`ai:${f.name}`)} aria-label={`Zaznacz ${f.name}`} /></td>
+                    <td className="nm">{f.name} <span className="badge" style={{ padding: '0 6px' }}>AI</span><br /><small>{f.website ? f.website.replace(/^https?:\/\/(www\.)?/, '') : 'brak strony'}</small></td>
+                    <td><small>propozycja – podobna marka</small></td>
+                    <td className="hide-sm"><small>{f.why}</small></td>
                   </tr>
                 ))}
               </tbody>
