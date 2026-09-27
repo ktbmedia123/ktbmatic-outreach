@@ -89,7 +89,7 @@ export default function LeadDrawer({ leadId, onClose }) {
             </select>
           </Field>
           <Field label="E-mail do wysyłki">
-            <input value={lead.email} onChange={set('email')} type="email" list={`em-${lead.id}`} />
+            <input value={lead.email} onChange={(e) => updateLead(lead.id, { email: e.target.value, emailManual: true })} type="email" list={`em-${lead.id}`} />
             <datalist id={`em-${lead.id}`}>
               {(lead.emails || []).map((e) => (
                 <option key={e} value={e} />
@@ -112,7 +112,7 @@ export default function LeadDrawer({ leadId, onClose }) {
             {lead.emails
               .filter((e) => e !== lead.email)
               .map((e) => (
-                <button key={e} className="chip" onClick={() => updateLead(lead.id, { email: e })}>
+                <button key={e} className="chip" onClick={() => updateLead(lead.id, { email: e, emailManual: true })}>
                   {e}
                 </button>
               ))}

@@ -81,3 +81,9 @@ const C1 = stampChanges(base, { ...base, campaigns: [{ id: 'c1', name: 'stara' }
 const C2 = { ...C1, campaigns: [{ id: 'c1', name: 'nowa', _u: T + 200 }] };
 assert.equal(mergeShared(toShared(C2), toShared(C1)).campaigns[0].name, 'nowa');
 console.log('✓ scalanie wspólnej bazy');
+
+const { pickBestEmail, usableEmails } = await import('../src/lib/enrich.js');
+assert.equal(pickBestEmail(['kontakt@rankomat.pl', 'media@rankomat.pl', 'iod@rankomat.pl', 'xxx@xxx.com', 'jan.kowalski@rankomat.pl'], 'https://rankomat.pl'), 'media@rankomat.pl');
+assert.equal(pickBestEmail(['ahoj@grubygarage.cz', 'kontakt@grubygarage.com.pl'], 'https://grubygarage.com.pl'), 'kontakt@grubygarage.com.pl');
+assert.deepEqual(usableEmails(['iod@firma.pl', 'rekrutacja@firma.pl', 'biuro@firma.pl']), ['biuro@firma.pl']);
+console.log('✓ wybór najlepszego e-maila');

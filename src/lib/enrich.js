@@ -14,10 +14,13 @@ export async function enrichWebsite(url) {
 
 // Łączy wynik z istniejącym kontaktem, nie nadpisując danych wpisanych ręcznie.
 export function mergeEnrichment(lead, r) {
-  const emails = [...new Set([...(lead.emails || []), ...(r.emails || [])])];
+  const emails = usableEmails([...new Set([...(lead.emails || []), ...(r.emails || [])])]);
+  const best = pickBestEmail(emails, lead.website);
+  // e-mail wpisany ręcznie zostaje; wybrany automatycznie może zostać zastąpiony lepszym
+  const keep = lead.email && (lead.emailManual || !emails.includes(lead.email));
   return {
     emails,
-    email: lead.email || pickBestEmail(emails),
+    email: keep ? lead.email : best || lead.email,
     phone: lead.phone || r.phones?.[0] || '',
     facebook: lead.facebook || r.facebook || '',
     instagram: lead.instagram || r.instagram || '',
@@ -27,13 +30,25 @@ export function mergeEnrichment(lead, r) {
   };
 }
 
-// Preferujemy adresy ogólne firmy (biuro@, kontakt@) – to adresy firmy, nie osób.
-export function pickBestEmail(emails = []) {
-  const pref = ['kontakt', 'biuro', 'info', 'office', 'sklep', 'serwis', 'sekretariat', 'handlowy', 'sprzedaz', 'marketing'];
-  const sorted = [...emails].sort((a, b) => {
-    const ia = pref.findIndex((p) => a.startsWith(p));
-    const ib = pref.findIndex((p) => b.startsWith(p));
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-  });
-  return sorted[0] || '';
+// Adresy, na które nie piszemy w sprawie współpracy (RODO, rekrutacja, automaty, przykłady ze stron).
+const BAD_LOCAL = /^(iod|rodo|gdpr|dpo|privacy|prywatnosc|daneosobowe|dane\.osobowe|rekrutacja|recruitment|kariera|careers|jobs|praca|hr|noreply|no-reply|donotreply|abuse|postmaster|webmaster|hostmaster|admin|root|test|example|xxx|user|name|email|mail)@/i;
+const BAD_DOMAIN = /@(xxx|example|domain|email|test|sentry[^.]*|wixpress)\./i;
+
+export const usableEmails = (emails = []) => emails.filter((e) => e && !BAD_LOCAL.test(e) && !BAD_DOMAIN.test(e));
+
+// Kolejność: dział marketingu / współpracy, potem ogólne adresy firmy, na końcu adresy osób.
+const PREF = ['marketing', 'media', 'pr', 'partner', 'partnerzy', 'wspolpraca', 'wspolprace', 'sponsoring', 'sponsor', 'reklama', 'kontakt', 'biuro', 'info', 'office', 'hello', 'hej', 'ahoj', 'sekretariat', 'sklep', 'sales', 'sprzedaz', 'handlowy', 'serwis', 'helpdesk', 'pomoc', 'bok'];
+
+export function pickBestEmail(emails = [], website = '') {
+  const site = (website || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
+  const rank = (e) => {
+    const local = e.split('@')[0].toLowerCase();
+    const dom = e.split('@')[1] || '';
+    let r = PREF.findIndex((p) => local === p || local.startsWith(`${p}.`) || local.startsWith(`${p}-`) || local.startsWith(p));
+    if (r === -1) r = /[._]/.test(local) ? 60 : 40; // imię.nazwisko – na końcu
+    if (site && !dom.endsWith(site.split('.').slice(-2).join('.'))) r += 30; // inna domena niż strona firmy
+    if (/(^|\.)(pl|com\.pl)$/.test(dom) === false && /\.pl$/.test(site)) r += 5; // np. .cz przy polskiej stronie
+    return r;
+  };
+  return [...usableEmails(emails)].sort((a, b) => rank(a) - rank(b))[0] || '';
 }
