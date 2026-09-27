@@ -1,7 +1,7 @@
 // Wyszukiwanie firm w Google – przez Gemini z narzędziem Google Search (darmowy limit klucza GEMINI_API_KEY).
 // Działa jako Netlify Edge Function, bo wyszukiwanie z AI trwa zwykle 10–30 s (zwykłe funkcje mają limit 10 s).
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
-const MODELS = ['gemini-flash-latest', 'gemini-2.5-flash'];
+const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
 
 function buildPrompt({ what, place, radiusKm, keywords, max }) {
   return `Użyj wyszukiwarki Google i znajdź realnie działające firmy: ${what}.
@@ -46,9 +46,8 @@ async function ask(key, prompt) {
       });
       const data = await res.json();
       if (!res.ok) {
-        lastErr = data.error?.message || `Błąd ${res.status}`;
-        if (res.status === 429) break; // limit – inny model nic nie da
-        continue;
+        lastErr = `${model}: ${data.error?.message || `Błąd ${res.status}`}`;
+        continue; // inny model może mieć osobny darmowy limit
       }
       const cand = data.candidates?.[0];
       const text = cand?.content?.parts?.map((p) => p.text || '').join('') || '';
@@ -96,7 +95,7 @@ export default async (req) => {
   if (!firms.length && errors.length) {
     const limit = errors.some((e) => /quota|exhausted|rate/i.test(e));
     return Response.json(
-      { error: limit ? 'Wyczerpany darmowy limit wyszukiwań Google w Gemini na dziś. Użyj mapy OSM albo spróbuj jutro.' : `Wyszukiwanie Google nie powiodło się: ${errors[0]}` },
+      { error: limit ? 'Wyczerpany darmowy limit wyszukiwań Google w Gemini. Użyj mapy OSM albo spróbuj później.' : `Wyszukiwanie Google nie powiodło się: ${errors[0]}`, details: errors[0]?.slice(0, 600) },
       { status: limit ? 429 : 502 },
     );
   }
