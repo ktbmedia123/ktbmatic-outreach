@@ -48,3 +48,17 @@ assert.equal(Buffer.from(bodyB64, 'base64').toString('utf8'), 'Zażółć gęśl
 
 if (problems) { console.log(`\n${problems} szablon(y) z problemami`); process.exit(1); }
 console.log('\n✓ Wszystkie testy logiki przeszły');
+
+// Łączenie wyników z mapy i z Google
+const { mergeLeads } = await import('../src/lib/search.js');
+const merged = mergeLeads(
+  [{ osmId: 'node/1', name: 'Auto Serwis Kowalski', city: 'Pruszcz Gdański', website: 'https://www.kowalski-auto.pl', source: 'osm', emails: [] }],
+  [
+    { osmId: 'web/a', name: 'Kowalski Auto Serwis', city: 'Pruszcz Gdański', website: 'kowalski-auto.pl', email: 'biuro@kowalski-auto.pl', emails: ['biuro@kowalski-auto.pl'], phone: '500600700', source: 'google' },
+    { osmId: 'web/b', name: 'Wulkanizacja Nowak', city: 'Gdańsk', website: '', source: 'google', emails: [] },
+  ],
+);
+assert.equal(merged.length, 2, 'ta sama strona www = ta sama firma');
+assert.equal(merged[0].email, 'biuro@kowalski-auto.pl');
+assert.deepEqual(merged[0].sources, ['osm', 'google']);
+console.log('✓ łączenie wyników z mapy i Google');

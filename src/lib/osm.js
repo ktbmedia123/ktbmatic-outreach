@@ -83,39 +83,70 @@ export function elementToLead(el, allowedCategories) {
   };
 }
 
+function toLeads(elements, categoryIds, center) {
+  const seen = new Set();
+  const leads = [];
+  for (const el of elements || []) {
+    if (!el.tags?.name) continue;
+    const lead = elementToLead(el, categoryIds);
+    const key = `${lead.name.toLowerCase()}|${(lead.address || '').toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (center.lat && lead.lat) lead.distanceKm = distanceKm(center, lead);
+    leads.push(lead);
+  }
+  leads.sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0));
+  return leads;
+}
+
+async function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  const outer = opts.signal;
+  outer?.addEventListener('abort', () => ctrl.abort());
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Najpierw przez serwer Netlify (/api/places – kilka serwerów Overpass równolegle),
+// awaryjnie (np. lokalnie bez Netlify) bezpośrednio z przeglądarki – zawsze z limitem czasu.
 export async function searchPlaces(categoryIds, center, { signal } = {}) {
   if (!categoryIds.length) throw new Error('Wybierz co najmniej jedną branżę.');
   const q = buildQuery(categoryIds, center);
   let lastErr;
+  try {
+    const res = await fetchWithTimeout('/api/places', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q }),
+      signal,
+    }, 40000);
+    const isJson = (res.headers.get('content-type') || '').includes('json');
+    if (isJson) {
+      const data = await res.json();
+      if (res.ok) return toLeads(data.elements, categoryIds, center);
+      if (res.status !== 404) throw Object.assign(new Error(data.error || `Błąd wyszukiwania (${res.status}).`), { final: true });
+    }
+  } catch (e) {
+    if (e.final || signal?.aborted) throw e;
+    if (e.name === 'AbortError') throw new Error('Mapa OSM nie odpowiedziała w 40 s. Zmniejsz promień albo użyj wyszukiwania Google.');
+    lastErr = e;
+  }
   for (const endpoint of OVERPASS) {
     try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        body: new URLSearchParams({ data: q }),
-        signal,
-      });
-      if (res.status === 429 || res.status === 504) throw new Error('Serwer map jest przeciążony. Spróbuj ponownie za chwilę albo zmniejsz promień.');
+      const res = await fetchWithTimeout(endpoint, { method: 'POST', body: new URLSearchParams({ data: q }), signal }, 25000);
       if (!res.ok) throw new Error(`Błąd wyszukiwania (${res.status}).`);
       const data = await res.json();
-      const seen = new Set();
-      const leads = [];
-      for (const el of data.elements || []) {
-        if (!el.tags?.name) continue;
-        const lead = elementToLead(el, categoryIds);
-        const key = `${lead.name.toLowerCase()}|${(lead.address || '').toLowerCase()}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (center.lat && lead.lat) lead.distanceKm = distanceKm(center, lead);
-        leads.push(lead);
-      }
-      leads.sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0));
-      return leads;
+      return toLeads(data.elements, categoryIds, center);
     } catch (e) {
-      if (e.name === 'AbortError') throw e;
-      lastErr = e;
+      if (signal?.aborted) throw e;
+      lastErr ||= e;
     }
   }
-  throw lastErr || new Error('Wyszukiwanie nie powiodło się.');
+  throw lastErr || new Error('Wyszukiwanie na mapie nie powiodło się.');
 }
 
 export function distanceKm(a, b) {

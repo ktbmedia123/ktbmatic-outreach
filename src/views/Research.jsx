@@ -3,6 +3,7 @@ import { Search, MapPin, Loader2, Plus, Upload, Sparkles, Mail, Globe, Phone, At
 import { useStore, addLeads, saveCampaign } from '../lib/store.js';
 import { CATEGORIES, categoryLabel } from '../lib/defaults.js';
 import { geocode, searchPlaces } from '../lib/osm.js';
+import { searchWeb, mergeLeads } from '../lib/search.js';
 import { parseLeadsCsv } from '../lib/csv.js';
 import { suggestProspects } from '../lib/ai.js';
 import { Field, Empty, SenderChip, go, toast } from '../components/ui.jsx';
@@ -64,16 +65,36 @@ export default function Research({ campaignId }) {
   );
 }
 
+const SOURCES = [
+  ['both', 'Google + mapa', 'najwięcej firm, wyniki połączone'],
+  ['google', 'Google', 'wizytówki, strony, katalogi firm'],
+  ['osm', 'Mapa OSM', 'szybko, dokładne położenie'],
+];
+
+const normName = (s = '') => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+
 function MapSearch({ campaign }) {
+  const { leads: allLeads } = useStore();
   const [query, setQuery] = useState(campaign.location?.label || '');
   const [places, setPlaces] = useState([]);
   const [center, setCenter] = useState(campaign.location || null);
   const [radius, setRadius] = useState(campaign.location?.radiusKm || 20);
   const [cats, setCats] = useState(campaign.categories.length ? campaign.categories : ['warsztaty']);
+  const [source, setSource] = useState('both');
+  const [keywords, setKeywords] = useState('');
   const [results, setResults] = useState(null);
+  const [sources, setSources] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [busy, setBusy] = useState('');
-  const [onlyContact, setOnlyContact] = useState(false);
+  const [progress, setProgress] = useState('');
+  // filtry wyników
+  const [needEmail, setNeedEmail] = useState(false);
+  const [needWww, setNeedWww] = useState(false);
+  const [needPhone, setNeedPhone] = useState(false);
+  const [hideKnown, setHideKnown] = useState(true);
+  const [maxKm, setMaxKm] = useState(null);
+  const [text, setText] = useState('');
+  const [catFilter, setCatFilter] = useState('');
 
   async function findPlace(e) {
     e?.preventDefault();
@@ -99,11 +120,13 @@ function MapSearch({ campaign }) {
 
   async function search() {
     setBusy('search');
+    setResults(null);
+    setSources([]);
     try {
-      // „Szukaj firm” działa od razu po wpisaniu miasta – bez osobnego klikania „Wskaż”
       let where = center;
       if (!where || (query.trim() && query.trim() !== where.label)) {
         if (!query.trim()) throw new Error('Wpisz miasto albo adres.');
+        setProgress('Szukam lokalizacji…');
         const found = await geocode(query);
         if (!found.length) throw new Error('Nie znaleziono takiej lokalizacji.');
         where = found[0];
@@ -111,30 +134,68 @@ function MapSearch({ campaign }) {
         setQuery(where.label);
         setPlaces([]);
       }
-      const r = await searchPlaces(cats, { ...where, radiusKm: radius });
-      setResults(r);
-      setSelected(new Set(r.filter((x) => x.email || x.website || x.facebook || x.instagram).map((x) => x.osmId)));
+      const area = { ...where, radiusKm: radius };
+      setProgress(source === 'osm' ? 'Przeszukuję mapę…' : source === 'google' ? 'Przeszukuję Google (10–40 s)…' : 'Przeszukuję mapę i Google (10–40 s)…');
+      const jobs = [];
+      if (source !== 'google') jobs.push(searchPlaces(cats, area).then((leads) => ({ kind: 'osm', leads })));
+      if (source !== 'osm')
+        jobs.push(
+          searchWeb({ categoryIds: cats, place: where.full || where.label, radiusKm: radius, keywords, center: where }).then((r) => ({ kind: 'google', ...r })),
+        );
+      const settled = await Promise.allSettled(jobs);
+      let merged = [];
+      let webSources = [];
+      const errors = [];
+      for (const r of settled) {
+        if (r.status === 'rejected') { errors.push(r.reason?.message || 'błąd'); continue; }
+        merged = mergeLeads(merged, r.value.leads);
+        if (r.value.sources) webSources = r.value.sources;
+      }
+      if (!merged.length && errors.length) throw new Error(errors.join(' '));
+      if (errors.length) toast(`Część wyników niedostępna: ${errors[0]}`, 'err');
+      if (cats.length > 4 && source !== 'osm') toast('Google przeszukuje maks. 4 branże naraz – pozostałe tylko na mapie.');
+      merged.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
+      setResults(merged);
+      setSources(webSources);
+      setMaxKm(null);
+      setSelected(new Set(merged.filter((x) => x.email || x.website || x.facebook || x.instagram).map((x) => x.osmId)));
       saveCampaign({ ...campaign, location: { label: where.label, lat: where.lat, lon: where.lon, radiusKm: radius } });
-      if (!r.length) toast('Brak firm w tym obszarze. Zwiększ promień albo dodaj branże.');
+      if (!merged.length) toast('Brak firm w tym obszarze. Zwiększ promień albo dodaj branże.');
     } catch (err) {
       toast(err.message, 'err');
     } finally {
       setBusy('');
+      setProgress('');
     }
   }
 
+  const known = useMemo(() => new Set(allLeads.map((l) => normName(l.name))), [allLeads]);
   const toggle = useCallback((id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
-  const shown = useMemo(() => (results || []).filter((r) => !onlyContact || r.email || r.website || r.phone || r.facebook || r.instagram), [results, onlyContact]);
+  const shown = useMemo(() => {
+    const t = normName(text);
+    return (results || []).filter(
+      (r) =>
+        (!needEmail || r.email) &&
+        (!needWww || r.website) &&
+        (!needPhone || r.phone) &&
+        (!hideKnown || !known.has(normName(r.name))) &&
+        (maxKm == null || r.distanceKm == null || r.distanceKm <= maxKm) &&
+        (!catFilter || r.category === catFilter) &&
+        (!t || normName(`${r.name} ${r.address} ${r.city} ${r.about}`).includes(t)),
+    );
+  }, [results, needEmail, needWww, needPhone, hideKnown, known, maxKm, catFilter, text]);
+  const knownCount = (results || []).filter((r) => known.has(normName(r.name))).length;
+  const shownSelected = shown.filter((r) => selected.has(r.osmId));
 
   const add = () => {
-    const picked = results.filter((r) => selected.has(r.osmId));
+    const picked = shownSelected.map(({ sources: _s, ...r }) => r);
     const added = addLeads(campaign.id, picked);
     toast(`Dodano ${added.length} firm${picked.length - added.length ? ` (pominięto ${picked.length - added.length} już dodanych)` : ''}.`);
     if (added.length) go(`kampania/${campaign.id}`);
   };
 
-  const withEmail = (results || []).filter((r) => r.email).length;
-  const withWww = (results || []).filter((r) => r.website).length;
+  const count = (fn) => (results || []).filter(fn).length;
+  const resultCats = [...new Set((results || []).map((r) => r.category).filter(Boolean))];
 
   return (
     <div className="stack lg">
@@ -173,11 +234,27 @@ function MapSearch({ campaign }) {
             ))}
           </div>
         </div>
+        <div className="grid-2" style={{ alignItems: 'end' }}>
+          <div>
+            <small>Źródło</small>
+            <div className="chips" style={{ marginTop: 6 }}>
+              {SOURCES.map(([k, l, d]) => (
+                <button key={k} className={`chip ${source === k ? 'on' : ''}`} onClick={() => setSource(k)} title={d}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <small className="muted">{SOURCES.find((s) => s[0] === source)[2]}</small>
+          </div>
+          <Field label="Słowa kluczowe (Google, opcjonalnie)" hint="np. „mechanika ciężarowa”, „diagnostyka komputerowa”, „bez sieciówek”.">
+            <input value={keywords} onChange={(e) => setKeywords(e.target.value)} disabled={source === 'osm'} placeholder="doprecyzuj, czego szukasz" />
+          </Field>
+        </div>
         <div className="row">
           <button className="btn primary" onClick={search} disabled={(!center && !query.trim()) || !cats.length || busy === 'search'}>
             {busy === 'search' ? <Loader2 size={16} className="spin" /> : <Search size={16} />} Szukaj firm
           </button>
-          {center ? <small>środek: {center.label}, promień {radius} km</small> : <small>Wpisz miasto i kliknij „Szukaj firm”.</small>}
+          {busy === 'search' ? <small>{progress}</small> : center ? <small>środek: {center.label}, promień {radius} km</small> : <small>Wpisz miasto i kliknij „Szukaj firm”.</small>}
         </div>
       </div>
 
@@ -186,22 +263,41 @@ function MapSearch({ campaign }) {
       {results && (
         <div className="panel flush">
           <div className="panel-head" style={{ flexWrap: 'wrap' }}>
-            <h3>{results.length} firm</h3>
-            <small>{withEmail} z e-mailem, {withWww} ze stroną www – brakujące e-maile pobierzesz ze stron w kampanii.</small>
+            <h3>{shown.length === results.length ? `${results.length} firm` : `${shown.length} z ${results.length} firm`}</h3>
+            <small>
+              {count((r) => r.email)} z e-mailem, {count((r) => r.website)} ze stroną, {count((r) => r.phone)} z telefonem
+              {source === 'both' && ` · Google: ${count((r) => r.sources?.includes('google'))}, mapa: ${count((r) => r.sources?.includes('osm'))}`}
+            </small>
             <div className="spacer" />
-            <label className="row tight" style={{ fontSize: 13 }}>
-              <input type="checkbox" checked={onlyContact} onChange={(e) => setOnlyContact(e.target.checked)} /> tylko z danymi kontaktowymi
-            </label>
-            <button className="btn primary" disabled={!selected.size} onClick={add}>
-              <Plus size={16} /> Dodaj zaznaczone ({selected.size})
+            <button className="btn primary" disabled={!shownSelected.length} onClick={add}>
+              <Plus size={16} /> Dodaj zaznaczone ({shownSelected.length})
             </button>
+          </div>
+          <div className="row" style={{ padding: '10px 16px', gap: 14, borderBottom: '1px solid var(--line)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Szukaj w wynikach…" style={{ maxWidth: 220 }} aria-label="Szukaj w wynikach" />
+            {resultCats.length > 1 && (
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="Branża" style={{ maxWidth: 230 }}>
+                <option value="">wszystkie branże</option>
+                {resultCats.map((c) => <option key={c} value={c}>{categoryLabel(c)}</option>)}
+              </select>
+            )}
+            <label className="row tight" style={{ fontSize: 13 }}><input type="checkbox" checked={needEmail} onChange={(e) => setNeedEmail(e.target.checked)} /> z e-mailem</label>
+            <label className="row tight" style={{ fontSize: 13 }}><input type="checkbox" checked={needWww} onChange={(e) => setNeedWww(e.target.checked)} /> ze stroną</label>
+            <label className="row tight" style={{ fontSize: 13 }}><input type="checkbox" checked={needPhone} onChange={(e) => setNeedPhone(e.target.checked)} /> z telefonem</label>
+            <label className="row tight" style={{ fontSize: 13 }} title="Firmy, które są już w którejkolwiek kampanii">
+              <input type="checkbox" checked={hideKnown} onChange={(e) => setHideKnown(e.target.checked)} /> ukryj już dodane{knownCount ? ` (${knownCount})` : ''}
+            </label>
+            <label className="row tight" style={{ fontSize: 13 }}>
+              do {maxKm ?? radius} km
+              <input type="range" min="1" max={radius} value={maxKm ?? radius} onChange={(e) => setMaxKm(Number(e.target.value) >= radius ? null : Number(e.target.value))} style={{ width: 110 }} aria-label="Maksymalna odległość" />
+            </label>
           </div>
           <div className="table-wrap" style={{ maxHeight: 520 }}>
             <table className="t">
               <thead>
                 <tr>
                   <th>
-                    <input type="checkbox" aria-label="Zaznacz wszystkie" checked={shown.length > 0 && shown.every((r) => selected.has(r.osmId))} onChange={(e) => setSelected(e.target.checked ? new Set(shown.map((r) => r.osmId)) : new Set())} />
+                    <input type="checkbox" aria-label="Zaznacz wszystkie" checked={shown.length > 0 && shown.every((r) => selected.has(r.osmId))} onChange={(e) => setSelected((s) => { const n = new Set(s); shown.forEach((r) => (e.target.checked ? n.add(r.osmId) : n.delete(r.osmId))); return n; })} />
                   </th>
                   <th>Firma</th>
                   <th>Kontakt</th>
@@ -213,7 +309,14 @@ function MapSearch({ campaign }) {
                 {shown.map((r) => (
                   <tr key={r.osmId} className={`clickable ${selected.has(r.osmId) ? 'sel' : ''}`} onClick={() => toggle(r.osmId)}>
                     <td><input type="checkbox" checked={selected.has(r.osmId)} onChange={() => toggle(r.osmId)} onClick={(e) => e.stopPropagation()} aria-label={`Zaznacz ${r.name}`} /></td>
-                    <td className="nm">{r.name}<br /><small>{categoryLabel(r.category)}</small></td>
+                    <td className="nm">
+                      {r.name}
+                      <br />
+                      <small>
+                        {categoryLabel(r.category)}
+                        {(r.sources || [r.source]).map((s) => <span key={s} className="badge" style={{ marginLeft: 6, padding: '0 6px' }}>{s === 'google' ? 'Google' : 'mapa'}</span>)}
+                      </small>
+                    </td>
                     <td>
                       <span className="ic-row">
                         <Mail size={15} className={r.email ? 'on' : ''} aria-label={r.email ? 'ma e-mail' : 'brak e-maila'} />
@@ -222,14 +325,24 @@ function MapSearch({ campaign }) {
                         <AtSign size={15} className={r.facebook || r.instagram ? 'on' : ''} aria-label={r.facebook || r.instagram ? 'ma social media' : 'brak social media'} />
                       </span>
                       {r.email && <><br /><small>{r.email}</small></>}
+                      {!r.email && r.phone && <><br /><small>{r.phone}</small></>}
                     </td>
-                    <td className="hide-sm"><small>{r.address}</small></td>
-                    <td>{r.distanceKm ?? '–'} km</td>
+                    <td className="hide-sm"><small>{[r.address, r.address?.includes(r.city) ? '' : r.city].filter(Boolean).join(', ')}</small></td>
+                    <td>{r.distanceKm != null ? `${r.distanceKm} km` : '–'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {!shown.length && <div style={{ padding: 16 }}><small>Żadna firma nie spełnia filtrów.</small></div>}
           </div>
+          {sources.length > 0 && (
+            <details style={{ padding: '10px 16px' }}>
+              <summary><small>Źródła Google ({sources.length})</small></summary>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                {sources.map((s, i) => <li key={i}><small><a href={s.uri} target="_blank" rel="noreferrer">{s.title || s.uri}</a></small></li>)}
+              </ul>
+            </details>
+          )}
         </div>
       )}
     </div>
