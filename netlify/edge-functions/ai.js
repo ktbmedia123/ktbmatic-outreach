@@ -20,13 +20,16 @@ export default async (req) => {
   const { model = 'gemini-flash-latest', body } = payload;
   if (!/^[a-z0-9.\-]+$/i.test(model) || !body?.contents) return Response.json({ error: 'Nieprawidłowe zapytanie' }, { status: 400 });
 
+  // szybsze odpowiedzi: krótkie „myślenie” modelu (limit Edge to ok. 40 s)
+  body.generationConfig = { ...(body.generationConfig || {}) };
+  if (!body.generationConfig.thinkingConfig) body.generationConfig.thinkingConfig = { thinkingLevel: 'low' };
   const models = [model, ...FALLBACK.filter((m) => m !== model)];
   const started = Date.now();
   let last = { status: 502, error: 'Brak odpowiedzi AI' };
   for (const m of models) {
-    if (Date.now() - started > 30000) break;
+    if (Date.now() - started > 22000) break;
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), Math.max(5000, 36000 - (Date.now() - started)));
+    const t = setTimeout(() => ctrl.abort(), Math.max(4000, 34000 - (Date.now() - started)));
     try {
       const res = await fetch(`${API}/${m}:generateContent`, {
         method: 'POST',
@@ -40,6 +43,11 @@ export default async (req) => {
         return Response.json({ text, model: m });
       }
       last = { status: res.status, error: data.error?.message || 'Błąd AI' };
+      if (res.status === 400 && /thinking/i.test(last.error) && body.generationConfig.thinkingConfig) {
+        delete body.generationConfig.thinkingConfig; // model nie obsługuje tego ustawienia – spróbuj bez
+        models.splice(models.indexOf(m) + 1, 0, m);
+        continue;
+      }
       // przeciążenie / limit / wycofany model → następny; błąd zapytania → od razu zwróć
       if (![429, 500, 503, 404].includes(res.status)) break;
     } catch (e) {
