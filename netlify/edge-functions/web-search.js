@@ -1,7 +1,7 @@
 // Wyszukiwanie firm w Google – przez Gemini z narzędziem Google Search (darmowy limit klucza GEMINI_API_KEY).
 // Działa jako Netlify Edge Function, bo wyszukiwanie z AI trwa zwykle 10–30 s (zwykłe funkcje mają limit 10 s).
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
-const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+const MODELS = ['gemini-flash-latest', 'gemini-3.5-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite'];
 
 function buildPrompt({ what, place, radiusKm, keywords, max }) {
   return `Użyj wyszukiwarki Google i znajdź realnie działające firmy: ${what}.
@@ -29,7 +29,7 @@ function parseList(text) {
 }
 
 async function ask(key, prompt) {
-  let lastErr = 'Brak odpowiedzi';
+  const errs = [];
   for (const model of MODELS) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 38000);
@@ -46,7 +46,7 @@ async function ask(key, prompt) {
       });
       const data = await res.json();
       if (!res.ok) {
-        lastErr = `${model}: ${data.error?.message || `Błąd ${res.status}`}`;
+        errs.push(`${model}: ${(data.error?.message || `Błąd ${res.status}`).slice(0, 160)}`);
         continue; // inny model może mieć osobny darmowy limit
       }
       const cand = data.candidates?.[0];
@@ -57,12 +57,12 @@ async function ask(key, prompt) {
         .map((w) => ({ title: w.title, uri: w.uri }));
       return { firms: parseList(text), sources };
     } catch (e) {
-      lastErr = e.name === 'AbortError' ? 'Wyszukiwanie trwało zbyt długo' : e.message;
+      errs.push(`${model}: ${e.name === 'AbortError' ? 'Wyszukiwanie trwało zbyt długo' : e.message}`);
     } finally {
       clearTimeout(t);
     }
   }
-  throw new Error(lastErr);
+  throw new Error(errs.join(' || ') || 'Brak odpowiedzi');
 }
 
 export default async (req) => {
@@ -95,7 +95,7 @@ export default async (req) => {
   if (!firms.length && errors.length) {
     const limit = errors.some((e) => /quota|exhausted|rate/i.test(e));
     return Response.json(
-      { error: limit ? 'Wyczerpany darmowy limit wyszukiwań Google w Gemini. Użyj mapy OSM albo spróbuj później.' : `Wyszukiwanie Google nie powiodło się: ${errors[0]}`, details: errors[0]?.slice(0, 600) },
+      { error: limit ? 'Wyczerpany darmowy limit wyszukiwań Google w Gemini. Użyj mapy OSM albo spróbuj później.' : `Wyszukiwanie Google nie powiodło się: ${errors[0]}`, details: errors[0]?.slice(0, 900) },
       { status: limit ? 429 : 502 },
     );
   }
