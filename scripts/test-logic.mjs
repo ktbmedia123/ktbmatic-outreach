@@ -87,3 +87,8 @@ assert.equal(pickBestEmail(['kontakt@rankomat.pl', 'media@rankomat.pl', 'iod@ran
 assert.equal(pickBestEmail(['ahoj@grubygarage.cz', 'kontakt@grubygarage.com.pl'], 'https://grubygarage.com.pl'), 'kontakt@grubygarage.com.pl');
 assert.deepEqual(usableEmails(['iod@firma.pl', 'rekrutacja@firma.pl', 'biuro@firma.pl']), ['biuro@firma.pl']);
 console.log('✓ wybór najlepszego e-maila');
+assert.equal(pickBestEmail(['infocastrol@aidisabolivia.com', 'marketing@enriel.com'], 'https://castrol.com'), '');
+assert.equal(pickBestEmail(['kontakt_iodo@michelin.com'], 'https://michelin.pl'), '');
+assert.equal(pickBestEmail(['helpdesk@melle.com', 'iod@melle.com'], 'https://k2.com.pl'), '');
+assert.equal(pickBestEmail(['pomoc@autoiso.pl'], 'https://autobaza.pl'), 'pomoc@autoiso.pl');
+console.log('✓ odrzucanie adresów z obcych domen');
