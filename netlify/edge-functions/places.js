@@ -8,7 +8,7 @@ const MIRRORS = [
   'https://overpass.kumi.systems/api/interpreter',
 ];
 const UA = 'KTBmatic/1.1 (outreach tool; +https://ktbmatic.netlify.app)';
-const LIMIT_MS = 32000;
+const LIMIT_MS = 20000;
 
 export default async (req) => {
   if (req.method !== 'POST') return Response.json({ error: 'Użyj POST' }, { status: 405 });

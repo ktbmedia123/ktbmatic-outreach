@@ -111,9 +111,58 @@ async function fetchWithTimeout(url, opts, ms) {
   }
 }
 
+// Zapasowe źródło, gdy serwery Overpass są przeciążone: Nominatim (wyszukiwanie po tagu w prostokącie).
+// Limit Nominatim: 1 zapytanie/s i do 40 wyników na tag – wystarczy do szybkiego przeglądu okolicy.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function searchNominatim(categoryIds, center, { signal } = {}) {
+  const pairs = [];
+  for (const id of categoryIds) {
+    const cat = CATEGORIES.find((c) => c.id === id);
+    for (const f of cat?.filters || []) {
+      const m = f.match(/^\["([^"]+)"="([^"]+)"\]$/);
+      if (m) pairs.push({ id, key: m[1], value: m[2] });
+    }
+  }
+  if (!pairs.length) throw new Error('Tych branż nie da się wyszukać w zapasowym źródle mapy.');
+  const dLat = center.radiusKm / 111;
+  const dLon = center.radiusKm / (111 * Math.cos((center.lat * Math.PI) / 180));
+  const viewbox = [center.lon - dLon, center.lat + dLat, center.lon + dLon, center.lat - dLat].join(',');
+  const elements = [];
+  for (const [i, p] of pairs.slice(0, 8).entries()) {
+    if (i) await sleep(1100);
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&bounded=1&extratags=1&addressdetails=1&accept-language=pl&viewbox=${viewbox}&q=${encodeURIComponent(`[${p.key}=${p.value}]`)}`;
+    try {
+      const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' }, signal }, 12000);
+      if (!res.ok) continue;
+      for (const d of await res.json()) {
+        const a = d.address || {};
+        elements.push({
+          type: d.osm_type,
+          id: d.osm_id,
+          lat: Number(d.lat),
+          lon: Number(d.lon),
+          tags: {
+            ...(d.extratags || {}),
+            [p.key]: p.value,
+            name: d.name || d.namedetails?.name,
+            'addr:street': a.road,
+            'addr:housenumber': a.house_number,
+            'addr:postcode': a.postcode,
+            'addr:city': a.city || a.town || a.village,
+          },
+        });
+      }
+    } catch (e) {
+      if (signal?.aborted) throw e;
+    }
+  }
+  return toLeads(elements, categoryIds, center).filter((l) => l.distanceKm == null || l.distanceKm <= center.radiusKm);
+}
+
 // Najpierw przez serwer Netlify (/api/places – kilka serwerów Overpass równolegle),
 // awaryjnie (np. lokalnie bez Netlify) bezpośrednio z przeglądarki – zawsze z limitem czasu.
-export async function searchPlaces(categoryIds, center, { signal } = {}) {
+async function searchOverpass(categoryIds, center, { signal } = {}) {
   if (!categoryIds.length) throw new Error('Wybierz co najmniej jedną branżę.');
   const q = buildQuery(categoryIds, center);
   let lastErr;
@@ -123,7 +172,7 @@ export async function searchPlaces(categoryIds, center, { signal } = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: q }),
       signal,
-    }, 40000);
+    }, 25000);
     const isJson = (res.headers.get('content-type') || '').includes('json');
     if (isJson) {
       const data = await res.json();
@@ -132,7 +181,7 @@ export async function searchPlaces(categoryIds, center, { signal } = {}) {
     }
   } catch (e) {
     if (e.final || signal?.aborted) throw e;
-    if (e.name === 'AbortError') throw new Error('Mapa OSM nie odpowiedziała w 40 s. Zmniejsz promień albo użyj wyszukiwania Google.');
+    if (e.name === 'AbortError') throw new Error('Mapa OSM nie odpowiedziała w 25 s. Zmniejsz promień albo użyj wyszukiwania Google.');
     lastErr = e;
   }
   for (const endpoint of OVERPASS) {
@@ -155,4 +204,16 @@ export function distanceKm(a, b) {
   const dLon = ((b.lon - a.lon) * Math.PI) / 180;
   const x = Math.sin(dLat / 2) ** 2 + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
   return Math.round(2 * R * Math.asin(Math.sqrt(x)) * 10) / 10;
+}
+
+export async function searchPlaces(categoryIds, center, opts = {}) {
+  if (!categoryIds.length) throw new Error('Wybierz co najmniej jedną branżę.');
+  try {
+    return await searchOverpass(categoryIds, center, opts);
+  } catch (e) {
+    if (opts.signal?.aborted) throw e;
+    const leads = await searchNominatim(categoryIds, center, opts);
+    if (!leads.length) throw e;
+    return leads;
+  }
 }
