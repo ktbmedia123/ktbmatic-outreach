@@ -44,9 +44,13 @@ export function buildVars(lead = {}, sender = {}, campaign = {}) {
     www: sender.website || '',
     rodo_admin: sender.rodoAdmin || sender.company || '[administrator danych]',
     rodo_link: sender.rodoLink ? ` Pełna informacja: ${sender.rodoLink}` : '',
-    zrodlo: SOURCE_LABEL[lead.source] || SOURCE_LABEL['ręcznie'],
+    // adres pobrany ze strony firmy (przycisk „Pobierz dane ze stron”) – tak podajemy w klauzuli RODO
+    zrodlo: lead.enrichedAt && lead.email && (lead.emails || []).includes(lead.email) ? 'strona internetowa Państwa firmy' : SOURCE_LABEL[lead.source] || SOURCE_LABEL['ręcznie'],
   };
-  base.podpis = cleanLines(fill(sender.signature || '{{imie_nadawcy}}\n{{nadawca}}', base));
+  base.podpis = cleanLines(fill(sender.signature || '{{imie_nadawcy}}\n{{nadawca}}', base))
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .join('\n');
   base.klauzula = fill(RODO_TEMPLATE, base);
   return base;
 }

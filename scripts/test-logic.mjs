@@ -94,3 +94,12 @@ assert.equal(pickBestEmail(['pomoc@autoiso.pl'], 'https://autobaza.pl'), 'pomoc@
 console.log('✓ odrzucanie adresów z obcych domen');
 assert.equal(pickBestEmail(['arpityres@gmail.com'], 'https://arpityres.pl'), 'arpityres@gmail.com');
 console.log('✓ darmowe skrzynki małych firm');
+{
+  const { renderMessage: rm } = await import('../src/lib/templates.js');
+  const t = CAMPAIGN_TEMPLATES.find((x) => x.key === 'sponsoring_tasiem');
+  const m = rm(t.templates.step1, { name: 'X', source: 'csv', email: 'a@x.pl', emails: ['a@x.pl'], enrichedAt: '2026-01-01' }, { ...DEFAULT_SENDERS[0], signerName: 'Jan Nowak' }, {});
+  assert.ok(m.body.includes('strona internetowa Państwa firmy'), 'klauzula RODO podaje stronę firmy jako źródło');
+  assert.ok(!/ktbmedia\.eu/.test(m.body.split('Jan Nowak')[1].split('ktbmedia.eu')[0].replace(/[^\n]/g, '').length > 2 ? '' : ''), 'brak pustych linii w podpisie');
+  assert.ok(!/\n\s*\nktbmedia\.eu/.test(m.body), 'brak pustej linii przed www w podpisie');
+  console.log('✓ klauzula RODO i podpis');
+}
