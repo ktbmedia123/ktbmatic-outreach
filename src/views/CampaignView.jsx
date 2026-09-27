@@ -176,7 +176,7 @@ function Workspace({ campaign, sender, leads, onOpenLead }) {
           const hook = await personalizeHook({ lead: l, sender, campaign });
           updateLead(l.id, (x) => ({ hook, drafts: {} }));
           ok++;
-          await new Promise((r) => setTimeout(r, 1200)); // darmowy limit AI – nie za szybko
+          await new Promise((r) => setTimeout(r, 4500)); // darmowy limit Gemini: ok. 15 zapytań na minutę
         }
       } catch (e) {
         skipped.push(`${l.name}: ${e.message}`);

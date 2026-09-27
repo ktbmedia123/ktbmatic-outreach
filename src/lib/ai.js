@@ -64,18 +64,20 @@ ZASADY PRAWNE (Polska, Prawo komunikacji elektronicznej art. 398, RODO) – bezw
 
 // Zdanie personalizujące do wstawienia w {{personalizacja}}
 export async function personalizeHook({ lead, sender, campaign }) {
-  const prompt = `Jesteś doświadczonym handlowcem B2B w branży motoryzacyjnej.
-Napisz JEDNO krótkie zdanie (maks. 25 słów), które nawiązuje do firmy odbiorcy i uzasadnia, dlaczego piszemy właśnie do niej.
-Zdanie trafi do pierwszej wiadomości z prośbą o zgodę na kontakt, więc nie może niczego oferować ani sprzedawać.
+  const info = [lead.about, lead.notes].filter(Boolean).join(' ').replace(/Propozycja AI:|Strona nie odpowiedziała[^.]*\.|Brak e-maila[^.]*\./g, '').slice(0, 800);
+  const prompt = `Piszesz jedno zdanie do pierwszej wiadomości od ${sender.company}${sender.actingAs ? ` (${sender.actingAs})` : ''} do firmy ${lead.name}.
+O NADAWCY: ${sender.shortDescription}. ${sender.about || ''}
+CEL KAMPANII: ${campaign.goal}
+ODBIORCA: ${lead.name}; branża: ${categoryLabel(lead.category) || 'nieznana'}; miasto: ${lead.city || 'nieznane'}; strona: ${lead.website || '-'}
+CO WIEMY O ODBIORCY: ${info || '-'}
+
+Zadanie: JEDNO zdanie (15–28 słów), które konkretnie łączy to, czym zajmuje się odbiorca, z tym, co robi nadawca – żeby było jasne, dlaczego piszemy właśnie do tej firmy. Ma brzmieć naturalnie, jak od człowieka, który zna tę firmę.
+Piszesz jako nadawca (np. agencja lub menedżer). O osobie, którą nadawca reprezentuje, pisz w trzeciej osobie – nigdy „mój”, „moich widzów”. Zwracaj się formą „Państwo”, nie „Wy”.
+Zakazy: nie zaczynaj od „Zauważyłem”, „Zauważyliśmy”, „Wiemy”, „Jako”; nie używaj słów: oferta, oferować, promocja, rabat, cena, zniżka; nie wymyślaj faktów; nie pisz w imieniu odbiorcy.
 ${LEGAL_RULES}
 
-NADAWCA: ${sender.company}${sender.actingAs ? ` (piszący: ${sender.actingAs})` : ''} – ${sender.shortDescription}
-CEL KAMPANII: ${campaign.goal}
-ODBIORCA: ${lead.name}; branża: ${categoryLabel(lead.category) || 'nieznana'}; miasto: ${lead.city || 'nieznane'}; adres: ${lead.address || '-'}; strona: ${lead.website || '-'}
-O ODBIORCY (ze strony www, jeśli jest): ${(lead.about || '-').slice(0, 800)}
-
 Zwróć JSON: {"hook": "zdanie"}`;
-  const r = await callGemini(prompt, { temperature: 0.6 });
+  const r = await callGemini(prompt, { temperature: 0.8 });
   return (r.hook || '').trim();
 }
 
